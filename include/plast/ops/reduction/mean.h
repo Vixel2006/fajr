@@ -12,33 +12,42 @@ namespace plast
 namespace ops
 {
 
-class SqueezeOperation : public BaseOperation
+class MeanOperation : public BaseOperation
 {
   public:
-    SqueezeOperation(size_t N, size_t M) : N(N), M(M) {}
+    MeanOperation(int dim, bool keepdim) : dim_(dim), keepdim_(keepdim), full_reduction_(false) {}
+    MeanOperation(bool full_reduction) : full_reduction_(full_reduction) {}
 
     const std::string& name() const override
     {
-        static std::string op_name = "squeeze";
+        static std::string op_name = "mean";
         return op_name;
     }
 
     std::vector<size_t>
     infer_output_shape(const std::vector<std::vector<size_t>>& input_shapes) const override
     {
+        if (full_reduction_)
+        {
+            return std::vector<size_t>(1, 1);
+        }
+
         std::vector<size_t> output_shape = input_shapes[0];
-        if (N >= output_shape.size())
+
+        if (dim_ >= output_shape.size())
         {
-            throw std::runtime_error("Squeeze dimension out of bounds.");
+            throw std::runtime_error("Can't reduce a tensor around a non-existing dimension.");
         }
-        if (output_shape[N] != 1)
+
+        if (!keepdim_)
         {
-            // If the dimension is not 1, we don't squeeze it.
-            // This might be an error or a no-op depending on desired behavior.
-            // For now, we'll just return the original shape.
-            return output_shape;
+            output_shape.erase(output_shape.begin() + dim_);
         }
-        output_shape.erase(output_shape.begin() + N);
+        else
+        {
+            output_shape[dim_] = 1;
+        }
+
         return output_shape;
     }
 
@@ -46,8 +55,9 @@ class SqueezeOperation : public BaseOperation
     tensor::Tensor execute_cuda(const std::vector<const tensor::Tensor*>& inputs) const override;
 
   private:
-    size_t N, M;
-    std::vector<size_t> new_shape_;
+    int dim_;
+    bool keepdim_;
+    bool full_reduction_;
 };
 
 } // namespace ops

@@ -24,10 +24,10 @@ namespace ops
 namespace init
 {
 
-plast::tensor::Tensor zeros(const std::vector<size_t>& shape, plast::core::DType dtype,
-                            plast::core::DeviceType device)
+std::shared_ptr<plast::tensor::Tensor>
+zeros(const std::vector<size_t>& shape, plast::core::DType dtype, plast::core::DeviceType device)
 {
-    plast::tensor::Tensor output(shape, dtype, device);
+    auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
     // Dispatch to CPU or CUDA kernel
     if (device == plast::core::DeviceType::CPU)
     {
@@ -35,11 +35,12 @@ plast::tensor::Tensor zeros(const std::vector<size_t>& shape, plast::core::DType
         // For now, we'll just set to 0 manually or use memset
         if (dtype == plast::core::DType::FLOAT32)
         {
-            std::fill((float*) output.data(), (float*) output.data() + output.num_elements(), 0.0f);
+            std::fill((float*) output->data(), (float*) output->data() + output->num_elements(),
+                      0.0f);
         }
         else if (dtype == plast::core::DType::INT32)
         {
-            std::fill((int*) output.data(), (int*) output.data() + output.num_elements(), 0);
+            std::fill((int*) output->data(), (int*) output->data() + output->num_elements(), 0);
         }
         else
         {
@@ -52,11 +53,11 @@ plast::tensor::Tensor zeros(const std::vector<size_t>& shape, plast::core::DType
         // Assuming a CUDA kernel for zeros exists
         if (dtype == plast::core::DType::FLOAT32)
         {
-            plast_cuda_zeros_float((float*) output.data(), output.num_elements());
+            plast_cuda_zeros_float((float*) output->data(), output->num_elements());
         }
         else if (dtype == plast::core::DType::INT32)
         {
-            plast_cuda_zeros_int((int*) output.data(), output.num_elements());
+            plast_cuda_zeros_int((int*) output->data(), output->num_elements());
         }
         else
         {
@@ -73,20 +74,21 @@ plast::tensor::Tensor zeros(const std::vector<size_t>& shape, plast::core::DType
     return output;
 }
 
-plast::tensor::Tensor ones(const std::vector<size_t>& shape, plast::core::DType dtype,
-                           plast::core::DeviceType device)
+std::shared_ptr<plast::tensor::Tensor>
+ones(const std::vector<size_t>& shape, plast::core::DType dtype, plast::core::DeviceType device)
 {
-    plast::tensor::Tensor output(shape, dtype, device);
+    auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
     // Dispatch to CPU or CUDA kernel
     if (device == plast::core::DeviceType::CPU)
     {
         if (dtype == plast::core::DType::FLOAT32)
         {
-            std::fill((float*) output.data(), (float*) output.data() + output.num_elements(), 1.0f);
+            std::fill((float*) output->data(), (float*) output->data() + output->num_elements(),
+                      1.0f);
         }
         else if (dtype == plast::core::DType::INT32)
         {
-            std::fill((int*) output.data(), (int*) output.data() + output.num_elements(), 1);
+            std::fill((int*) output->data(), (int*) output->data() + output->num_elements(), 1);
         }
         else
         {
@@ -98,11 +100,11 @@ plast::tensor::Tensor ones(const std::vector<size_t>& shape, plast::core::DType 
 #ifdef PLAST_CUDA_ENABLED
         if (dtype == plast::core::DType::FLOAT32)
         {
-            plast_cuda_ones_float((float*) output.data(), output.num_elements());
+            plast_cuda_ones_float((float*) output->data(), output->num_elements());
         }
         else if (dtype == plast::core::DType::INT32)
         {
-            plast_cuda_ones_int((int*) output.data(), output.num_elements());
+            plast_cuda_ones_int((int*) output->data(), output->num_elements());
         }
         else
         {
@@ -119,10 +121,11 @@ plast::tensor::Tensor ones(const std::vector<size_t>& shape, plast::core::DType 
     return output;
 }
 
-plast::tensor::Tensor randn(const std::vector<size_t>& shape, plast::core::DType dtype,
-                            plast::core::DeviceType device, int seed)
+std::shared_ptr<plast::tensor::Tensor> randn(const std::vector<size_t>& shape,
+                                             plast::core::DType dtype,
+                                             plast::core::DeviceType device, int seed)
 {
-    plast::tensor::Tensor output(shape, dtype, device);
+    auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
     // Dispatch to CPU or CUDA kernel
     if (device == plast::core::DeviceType::CPU)
     {
@@ -130,8 +133,8 @@ plast::tensor::Tensor randn(const std::vector<size_t>& shape, plast::core::DType
         std::normal_distribution<float> distribution(0.0f, 1.0f);
         if (dtype == plast::core::DType::FLOAT32)
         {
-            float* data_ptr = (float*) output.data();
-            for (size_t i = 0; i < output.num_elements(); ++i)
+            float* data_ptr = (float*) output->data();
+            for (size_t i = 0; i < output->num_elements(); ++i)
             {
                 data_ptr[i] = distribution(generator);
             }
@@ -146,7 +149,7 @@ plast::tensor::Tensor randn(const std::vector<size_t>& shape, plast::core::DType
 #ifdef PLAST_CUDA_ENABLED
         if (dtype == plast::core::DType::FLOAT32)
         {
-            plast_cuda_randn_float((float*) output.data(), output.num_elements(), seed);
+            plast_cuda_randn_float((float*) output->data(), output->num_elements(), seed);
         }
         else
         {
@@ -163,10 +166,12 @@ plast::tensor::Tensor randn(const std::vector<size_t>& shape, plast::core::DType
     return output;
 }
 
-plast::tensor::Tensor uniform(const std::vector<size_t>& shape, plast::core::DType dtype,
-                              plast::core::DeviceType device, float low, float high)
+std::shared_ptr<plast::tensor::Tensor> uniform(const std::vector<size_t>& shape,
+                                               plast::core::DType dtype,
+                                               plast::core::DeviceType device, float low,
+                                               float high)
 {
-    plast::tensor::Tensor output(shape, dtype, device);
+    auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
     // Dispatch to CPU or CUDA kernel
     if (device == plast::core::DeviceType::CPU)
     {
@@ -174,8 +179,8 @@ plast::tensor::Tensor uniform(const std::vector<size_t>& shape, plast::core::DTy
         std::uniform_real_distribution<float> distribution(low, high);
         if (dtype == plast::core::DType::FLOAT32)
         {
-            float* data_ptr = (float*) output.data();
-            for (size_t i = 0; i < output.num_elements(); ++i)
+            float* data_ptr = (float*) output->data();
+            for (size_t i = 0; i < output->num_elements(); ++i)
             {
                 data_ptr[i] = distribution(generator);
             }
@@ -190,7 +195,7 @@ plast::tensor::Tensor uniform(const std::vector<size_t>& shape, plast::core::DTy
 #ifdef PLAST_CUDA_ENABLED
         if (dtype == plast::core::DType::FLOAT32)
         {
-            plast_cuda_uniform_float((float*) output.data(), output.num_elements(), low, high);
+            plast_cuda_uniform_float((float*) output->data(), output->num_elements(), low, high);
         }
         else
         {
@@ -208,21 +213,22 @@ plast::tensor::Tensor uniform(const std::vector<size_t>& shape, plast::core::DTy
     return output;
 }
 
-plast::tensor::Tensor from_data(void* data, const std::vector<size_t>& shape,
-                                plast::core::DType dtype, plast::core::DeviceType device)
+std::shared_ptr<plast::tensor::Tensor> from_data(void* data, const std::vector<size_t>& shape,
+                                                 plast::core::DType dtype,
+                                                 plast::core::DeviceType device)
 {
-    plast::tensor::Tensor output(shape, dtype, device);
-    size_t num_elements = output.num_elements();
-    size_t nbytes = output.nbytes();
+    auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
+    size_t num_elements = output->num_elements();
+    size_t nbytes = output->nbytes();
 
     if (device == plast::core::DeviceType::CPU)
     {
-        std::memcpy(output.data(), data, nbytes);
+        std::memcpy(output->data(), data, nbytes);
     }
     else if (device == plast::core::DeviceType::CUDA)
     {
 #ifdef PLAST_CUDA_ENABLED
-        PLAST_CUDA_CHECK(cudaMemcpy(output.data(), data, nbytes, cudaMemcpyHostToDevice));
+        PLAST_CUDA_CHECK(cudaMemcpy(output->data(), data, nbytes, cudaMemcpyHostToDevice));
 #else
         throw std::runtime_error(
             "CUDA is not enabled. Cannot create tensor from data on CUDA device.");
