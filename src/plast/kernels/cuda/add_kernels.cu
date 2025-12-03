@@ -8,9 +8,11 @@ __global__ void add_cuda_kernel_float_kernel(float* out, const float* in1, const
                                              size_t num_elements)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_elements)
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_elements; i += stride)
     {
-        out[idx] = in1[idx] + in2[idx];
+        out[i] = in1[i] + in2[i];
     }
 }
 
@@ -37,7 +39,7 @@ __global__ void add_cuda_kernel_strided_float_kernel(float* out, const float* in
     if (flat_idx >= total_elements) return;
 
     // Reconstruct multi-dimensional indices from flat_idx
-    size_t current_indices[MAX_TENSOR_DIMS]; // Use fixed-size array
+    size_t current_indices[PLAST_MAX_DIMS]; // Use fixed-size array
     size_t temp_flat_idx = flat_idx;
     for (int i = out_ndim - 1; i >= 0; --i)
     {
@@ -78,9 +80,11 @@ __global__ void add_cuda_kernel_int32_kernel(int32_t* out, const int32_t* in1, c
                                              size_t num_elements)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_elements)
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_elements; i += stride)
     {
-        out[idx] = in1[idx] + in2[idx];
+        out[i] = in1[i] + in2[i];
     }
 }
 
@@ -109,7 +113,7 @@ __global__ void add_cuda_kernel_strided_int32_kernel(int32_t* out, const int32_t
     if (flat_idx >= total_elements) return;
 
     // Reconstruct multi-dimensional indices from flat_idx
-    size_t current_indices[MAX_TENSOR_DIMS]; // Use fixed-size array
+    size_t current_indices[PLAST_MAX_DIMS]; // Use fixed-size array
     size_t temp_flat_idx = flat_idx;
     for (int i = out_ndim - 1; i >= 0; --i)
     {

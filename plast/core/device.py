@@ -52,6 +52,10 @@ class Device:
         return hash((self.type, self.index))
 
     @staticmethod
+    def is_cuda_available() -> bool:
+        return cpp_bindings.is_cuda_available()
+
+    @staticmethod
     def parse(device_str: str) -> "Device":
         parts = device_str.lower().split(":")
         device_type = parts[0]

@@ -1,6 +1,7 @@
 #include "plast/tensor/tensor.h"
 #include "plast/core/data_buffer.h"
 #include "plast/core/types.h"
+#include "plast/kernels/cuda/strided_copy_kernels.h" // Include new strided copy kernel
 #include <iostream>
 
 #include <cstring>
@@ -64,6 +65,20 @@ std::vector<size_t> calculate_contiguous_strides(const std::vector<size_t>& shap
         stride *= shape[i];
     }
     return strides;
+}
+
+// Helper to increment multi-dimensional coordinates
+void increment_coords(std::vector<size_t>& coords, const std::vector<size_t>& shape)
+{
+    for (int i = coords.size() - 1; i >= 0; --i)
+    {
+        coords[i]++;
+        if (coords[i] < shape[i])
+        {
+            return;
+        }
+        coords[i] = 0;
+    }
 }
 
 // Constructor for creating a new tensor with allocated memory (contiguous strides)
@@ -190,7 +205,60 @@ Tensor Tensor::to(core::DeviceType target_device) const
         else if (device() == core::DeviceType::CUDA && target_device == core::DeviceType::CPU)
         {
 #ifdef PLAST_CUDA_ENABLED
-            PLAST_CUDA_CHECK(cudaMemcpy(new_tensor.data(), data(), bytes, cudaMemcpyDeviceToHost));
+            if (is_contiguous())
+            {
+                PLAST_CUDA_CHECK(
+                    cudaMemcpy(new_tensor.data(), data(), bytes, cudaMemcpyDeviceToHost));
+            }
+            else
+            {
+#ifdef PLAST_CUDA_ENABLED
+                std::cout << "DEBUG: Non-contiguous CUDA to CPU transfer." << std::endl;
+                std::cout << "DEBUG: Source Tensor - Shape: [";
+                for (size_t s : shape_) std::cout << s << " ";
+                std::cout << "], Strides: [";
+                for (size_t s : strides_) std::cout << s << " ";
+                std::cout << "]" << std::endl;
+
+                // Create a temporary contiguous CUDA tensor
+                Tensor temp_contiguous_cuda_tensor(shape_, dtype_, core::DeviceType::CUDA);
+
+                std::cout << "DEBUG: Temp Contiguous CUDA Tensor - Shape: [";
+                for (size_t s : temp_contiguous_cuda_tensor.shape()) std::cout << s << " ";
+                std::cout << "], Strides: [";
+                for (size_t s : temp_contiguous_cuda_tensor.strides()) std::cout << s << " ";
+                std::cout << "]" << std::endl;
+
+                // Use strided copy kernel to copy from source non-contiguous CUDA to temporary contiguous CUDA
+                switch (dtype_)
+                {
+                case core::DType::FLOAT32:
+                    plast_cuda_strided_copy_float(
+                        static_cast<const float*>(data()), shape_.data(), strides_.data(),
+                        shape_.size(), static_cast<float*>(temp_contiguous_cuda_tensor.data()),
+                        temp_contiguous_cuda_tensor.shape().data(),
+                        temp_contiguous_cuda_tensor.shape().size());
+                    break;
+                case core::DType::INT32:
+                    plast_cuda_strided_copy_int32(
+                        static_cast<const int32_t*>(data()), shape_.data(), strides_.data(),
+                        shape_.size(), static_cast<int32_t*>(temp_contiguous_cuda_tensor.data()),
+                        temp_contiguous_cuda_tensor.shape().data(),
+                        temp_contiguous_cuda_tensor.shape().size());
+                    break;
+                // Add more types as needed
+                default:
+                    throw std::runtime_error(
+                        "Unsupported DType for strided CUDA to CPU transfer.");
+                }
+
+                // Now copy the temporary contiguous CUDA tensor to the CPU tensor
+                PLAST_CUDA_CHECK(cudaMemcpy(new_tensor.data(), temp_contiguous_cuda_tensor.data(),
+                                            bytes, cudaMemcpyDeviceToHost));
+#else
+                throw std::runtime_error("CUDA is not enabled. Cannot perform CUDA memcpy.");
+#endif
+            }
 #else
             throw std::runtime_error("CUDA is not enabled. Cannot perform CUDA memcpy.");
 #endif
@@ -221,9 +289,9 @@ Tensor Tensor::clone() const
     // Create a new contiguous tensor with the same shape, dtype, and device
     Tensor new_tensor(shape_, dtype_, device());
 
-    if (is_contiguous() && new_tensor.is_contiguous())
+    if (is_contiguous())
     {
-        // If both are contiguous, a simple data copy is sufficient
+        // If the input tensor is contiguous, a simple data copy is sufficient
         size_t bytes = nbytes();
         if (bytes > 0)
         {
@@ -244,46 +312,53 @@ Tensor Tensor::clone() const
     }
     else
     {
-        // If not contiguous, iterate through elements and copy them
-        size_t num_elements_ = num_elements();
-        size_t item_size = get_dtype_size(dtype_);
-
-        // Get raw pointers to data
-        char* src_data = static_cast<char*>(data());
-        char* dst_data = static_cast<char*>(new_tensor.data());
-
-        std::vector<size_t> current_coords(shape_.size(), 0);
-        for (size_t i = 0; i < num_elements_; ++i)
+        // If not contiguous, use strided copy
+        if (device() == core::DeviceType::CPU)
         {
-            size_t src_offset = 0;
-            for (size_t dim = 0; dim < shape_.size(); ++dim)
-            {
-                src_offset += current_coords[dim] * strides_[dim];
-            }
+            size_t num_elements_ = num_elements();
+            size_t item_size = get_dtype_size(dtype_);
 
-            // Copy element from source to destination
-            // This assumes CPU memory. For CUDA, this would require device-side kernel or
-            // host-side loop with cudaMemcpy for each element, which is very slow.
-            // A better approach for CUDA non-contiguous clone would be a dedicated kernel.
-            if (device() == core::DeviceType::CPU)
+            char* src_data = static_cast<char*>(data());
+            char* dst_data = static_cast<char*>(new_tensor.data());
+
+            std::vector<size_t> current_coords(shape_.size(), 0);
+            for (size_t i = 0; i < num_elements_; ++i)
             {
+                size_t src_offset = 0;
+                for (size_t dim = 0; dim < shape_.size(); ++dim)
+                {
+                    src_offset += current_coords[dim] * strides_[dim];
+                }
                 std::memcpy(dst_data + i * item_size, src_data + src_offset * item_size, item_size);
+                increment_coords(current_coords, shape_);
             }
-            else if (device() == core::DeviceType::CUDA)
-            {
+        }
+        else if (device() == core::DeviceType::CUDA)
+        {
 #ifdef PLAST_CUDA_ENABLED
-                // This is highly inefficient for CUDA. A dedicated CUDA kernel would be needed.
-                // For now, we'll do a host-side copy for demonstration, which will be slow.
-                // This should ideally be replaced by a CUDA kernel that handles strided copies.
-                char temp_val[item_size];
-                PLAST_CUDA_CHECK(cudaMemcpy(temp_val, src_data + src_offset * item_size, item_size,
-                                            cudaMemcpyDeviceToHost));
-                PLAST_CUDA_CHECK(cudaMemcpy(dst_data + i * item_size, temp_val, item_size,
-                                            cudaMemcpyHostToDevice));
-#else
-                throw std::runtime_error("CUDA is not enabled. Cannot perform CUDA memcpy.");
-#endif
+            // Use the new CUDA strided copy kernel
+            switch (dtype_)
+            {
+            case core::DType::FLOAT32:
+                plast_cuda_strided_copy_float(
+                    static_cast<const float*>(data()), shape_.data(), strides_.data(),
+                    shape_.size(), static_cast<float*>(new_tensor.data()), new_tensor.shape().data(),
+                    new_tensor.shape().size());
+                break;
+            case core::DType::INT32:
+                plast_cuda_strided_copy_int32(
+                    static_cast<const int32_t*>(data()), shape_.data(), strides_.data(),
+                    shape_.size(), static_cast<int32_t*>(new_tensor.data()), new_tensor.shape().data(),
+                    new_tensor.shape().size());
+                break;
+            // Add more types as needed
+            default:
+                throw std::runtime_error(
+                    "Unsupported DType for strided CUDA clone operation.");
             }
+#else
+            throw std::runtime_error("CUDA is not enabled. Cannot perform CUDA strided copy.");
+#endif
         }
     }
     return new_tensor;

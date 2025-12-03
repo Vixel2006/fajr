@@ -1,4 +1,5 @@
 #include "plast/core/device_management.h"
+#include "plast/core/data_buffer.h" // Added for DataBuffer::fill
 #include "plast/ops/init/init_ops.h"
 
 #include <algorithm>
@@ -9,10 +10,6 @@
 #ifdef PLAST_CUDA_ENABLED
 #include <cuda_runtime.h>
 // Declare CUDA kernels for initialization
-extern "C" void plast_cuda_zeros_float(float* out, size_t num_elements);
-extern "C" void plast_cuda_zeros_int(int* out, size_t num_elements);
-extern "C" void plast_cuda_ones_float(float* out, size_t num_elements);
-extern "C" void plast_cuda_ones_int(int* out, size_t num_elements);
 extern "C" void plast_cuda_randn_float(float* out, size_t num_elements, int seed);
 extern "C" void plast_cuda_uniform_float(float* out, size_t num_elements, float low, float high);
 #endif
@@ -28,41 +25,15 @@ std::shared_ptr<plast::tensor::Tensor>
 zeros(const std::vector<size_t>& shape, plast::core::DType dtype, plast::core::DeviceType device)
 {
     auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
-    // Dispatch to CPU or CUDA kernel
+    // Use DataBuffer::fill to set all bytes to 0
     if (device == plast::core::DeviceType::CPU)
     {
-        // Assuming a CPU kernel for zeros exists
-        // For now, we'll just set to 0 manually or use memset
-        if (dtype == plast::core::DType::FLOAT32)
-        {
-            std::fill((float*) output->data(), (float*) output->data() + output->num_elements(),
-                      0.0f);
-        }
-        else if (dtype == plast::core::DType::INT32)
-        {
-            std::fill((int*) output->data(), (int*) output->data() + output->num_elements(), 0);
-        }
-        else
-        {
-            throw std::runtime_error("Unsupported DType for zeros on CPU.");
-        }
+        std::memset(output->data(), 0, output->nbytes());
     }
     else if (device == plast::core::DeviceType::CUDA)
     {
 #ifdef PLAST_CUDA_ENABLED
-        // Assuming a CUDA kernel for zeros exists
-        if (dtype == plast::core::DType::FLOAT32)
-        {
-            plast_cuda_zeros_float((float*) output->data(), output->num_elements());
-        }
-        else if (dtype == plast::core::DType::INT32)
-        {
-            plast_cuda_zeros_int((int*) output->data(), output->num_elements());
-        }
-        else
-        {
-            throw std::runtime_error("Unsupported DType for zeros on CUDA.");
-        }
+        PLAST_CUDA_CHECK(cudaMemset(output->data(), 0, output->nbytes()));
 #else
         throw std::runtime_error("CUDA is not enabled. Cannot create zeros tensor on CUDA device.");
 #endif
@@ -78,45 +49,90 @@ std::shared_ptr<plast::tensor::Tensor>
 ones(const std::vector<size_t>& shape, plast::core::DType dtype, plast::core::DeviceType device)
 {
     auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
-    // Dispatch to CPU or CUDA kernel
-    if (device == plast::core::DeviceType::CPU)
+    size_t num_elements = output->num_elements();
+    size_t item_size = plast::tensor::get_dtype_size(dtype); // Assuming get_dtype_size is accessible
+
+    if (dtype == plast::core::DType::UINT8 || dtype == plast::core::DType::INT8)
     {
-        if (dtype == plast::core::DType::FLOAT32)
+        if (device == plast::core::DeviceType::CPU)
         {
-            std::fill((float*) output->data(), (float*) output->data() + output->num_elements(),
-                      1.0f);
+            std::memset(output->data(), 1, output->nbytes());
         }
-        else if (dtype == plast::core::DType::INT32)
+        else if (device == plast::core::DeviceType::CUDA)
         {
-            std::fill((int*) output->data(), (int*) output->data() + output->num_elements(), 1);
-        }
-        else
-        {
-            throw std::runtime_error("Unsupported DType for ones on CPU.");
-        }
-    }
-    else if (device == plast::core::DeviceType::CUDA)
-    {
 #ifdef PLAST_CUDA_ENABLED
-        if (dtype == plast::core::DType::FLOAT32)
-        {
-            plast_cuda_ones_float((float*) output->data(), output->num_elements());
-        }
-        else if (dtype == plast::core::DType::INT32)
-        {
-            plast_cuda_ones_int((int*) output->data(), output->num_elements());
+            PLAST_CUDA_CHECK(cudaMemset(output->data(), 1, output->nbytes()));
+#else
+            throw std::runtime_error("CUDA is not enabled. Cannot create ones tensor on CUDA device.");
+#endif
         }
         else
         {
-            throw std::runtime_error("Unsupported DType for ones on CUDA.");
+            throw std::runtime_error("Unsupported device type for ones.");
         }
-#else
-        throw std::runtime_error("CUDA is not enabled. Cannot create ones tensor on CUDA device.");
-#endif
     }
     else
     {
-        throw std::runtime_error("Unsupported device type for ones.");
+        // Create a temporary host buffer and fill it with 1s
+        std::vector<char> host_data(num_elements * item_size);
+        if (dtype == plast::core::DType::FLOAT32)
+        {
+            std::fill((float*)host_data.data(), (float*)host_data.data() + num_elements, 1.0f);
+        }
+        else if (dtype == plast::core::DType::FLOAT64)
+        {
+            std::fill((double*)host_data.data(), (double*)host_data.data() + num_elements, 1.0);
+        }
+        else if (dtype == plast::core::DType::INT16)
+        {
+            std::fill((int16_t*)host_data.data(), (int16_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::INT32)
+        {
+            std::fill((int32_t*)host_data.data(), (int32_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::INT64)
+        {
+            std::fill((int64_t*)host_data.data(), (int64_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::UINT16)
+        {
+            std::fill((uint16_t*)host_data.data(), (uint16_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::UINT32)
+        {
+            std::fill((uint32_t*)host_data.data(), (uint32_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::UINT64)
+        {
+            std::fill((uint64_t*)host_data.data(), (uint64_t*)host_data.data() + num_elements, 1);
+        }
+        else if (dtype == plast::core::DType::BOOL)
+        {
+            std::fill((bool*)host_data.data(), (bool*)host_data.data() + num_elements, true);
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported DType for ones.");
+        }
+
+        // Copy from host to device
+        if (device == plast::core::DeviceType::CPU)
+        {
+            std::memcpy(output->data(), host_data.data(), num_elements * item_size);
+        }
+        else if (device == plast::core::DeviceType::CUDA)
+        {
+#ifdef PLAST_CUDA_ENABLED
+            PLAST_CUDA_CHECK(cudaMemcpy(output->data(), host_data.data(), num_elements * item_size, cudaMemcpyHostToDevice));
+#else
+            throw std::runtime_error("CUDA is not enabled. Cannot create ones tensor on CUDA device.");
+#endif
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported device type for ones.");
+        }
     }
     return output;
 }
@@ -169,13 +185,13 @@ std::shared_ptr<plast::tensor::Tensor> randn(const std::vector<size_t>& shape,
 std::shared_ptr<plast::tensor::Tensor> uniform(const std::vector<size_t>& shape,
                                                plast::core::DType dtype,
                                                plast::core::DeviceType device, float low,
-                                               float high)
+                                               float high, int seed)
 {
     auto output = std::make_shared<plast::tensor::Tensor>(shape, dtype, device);
     // Dispatch to CPU or CUDA kernel
     if (device == plast::core::DeviceType::CPU)
     {
-        std::mt19937 generator(std::random_device{}()); // Use random_device for seed
+        std::mt19937 generator(seed); // Use provided seed
         std::uniform_real_distribution<float> distribution(low, high);
         if (dtype == plast::core::DType::FLOAT32)
         {

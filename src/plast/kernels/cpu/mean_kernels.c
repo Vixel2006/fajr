@@ -141,10 +141,16 @@ void plast_cpu_mean_reduction_dim_float(const float* input_data, float* output_d
 
     for (size_t out_flat_idx = 0; out_flat_idx < output_total_elements; ++out_flat_idx)
     {
-        size_t current_input_base_idx = 0;
-        size_t temp_out_flat_idx = out_flat_idx;
-        size_t current_output_dim_idx = 0;
+        size_t output_coords[output_ndim];
+        size_t temp_flat_idx = out_flat_idx;
+        for (int i = output_ndim - 1; i >= 0; --i)
+        {
+            output_coords[i] = temp_flat_idx % output_shape[i];
+            temp_flat_idx /= output_shape[i];
+        }
 
+        size_t current_input_base_idx = 0;
+        size_t output_coord_idx = 0;
         for (size_t i = 0; i < input_ndim; ++i)
         {
             if (i == dim)
@@ -153,11 +159,8 @@ void plast_cpu_mean_reduction_dim_float(const float* input_data, float* output_d
             }
             else
             {
-                size_t coord_in_this_dim =
-                    (temp_out_flat_idx / output_strides[current_output_dim_idx]) %
-                    output_shape[current_output_dim_idx];
-                current_input_base_idx += coord_in_this_dim * input_strides[i];
-                current_output_dim_idx++;
+                current_input_base_idx += output_coords[output_coord_idx] * input_strides[i];
+                output_coord_idx++;
             }
         }
 
@@ -187,10 +190,16 @@ void plast_cpu_mean_reduction_dim_strided_float(const float* input_data, float* 
 
     for (size_t out_flat_idx = 0; out_flat_idx < output_total_elements; ++out_flat_idx)
     {
-        size_t current_input_base_physical_idx = 0;
-        size_t temp_out_flat_idx = out_flat_idx;
-        size_t current_output_dim_idx = 0;
+        size_t output_coords[output_ndim];
+        size_t temp_flat_idx = out_flat_idx;
+        for (int i = output_ndim - 1; i >= 0; --i)
+        {
+            output_coords[i] = temp_flat_idx % output_shape[i];
+            temp_flat_idx /= output_shape[i];
+        }
 
+        size_t current_input_base_physical_idx = 0;
+        size_t output_coord_idx = 0;
         for (size_t i = 0; i < input_ndim; ++i)
         {
             if (i == dim)
@@ -199,11 +208,8 @@ void plast_cpu_mean_reduction_dim_strided_float(const float* input_data, float* 
             }
             else
             {
-                size_t coord_in_this_dim =
-                    (temp_out_flat_idx / output_strides[current_output_dim_idx]) %
-                    output_shape[current_output_dim_idx];
-                current_input_base_physical_idx += coord_in_this_dim * input_strides[i];
-                current_output_dim_idx++;
+                current_input_base_physical_idx += output_coords[output_coord_idx] * input_strides[i];
+                output_coord_idx++;
             }
         }
 
@@ -236,10 +242,16 @@ void plast_cpu_mean_reduction_dim_int32(const int32_t* input_data, int32_t* outp
 
     for (size_t out_flat_idx = 0; out_flat_idx < output_total_elements; ++out_flat_idx)
     {
-        size_t current_input_base_idx = 0;
-        size_t temp_out_flat_idx = out_flat_idx;
-        size_t current_output_dim_idx = 0;
+        size_t output_coords[output_ndim];
+        size_t temp_flat_idx = out_flat_idx;
+        for (int i = output_ndim - 1; i >= 0; --i)
+        {
+            output_coords[i] = temp_flat_idx % output_shape[i];
+            temp_flat_idx /= output_shape[i];
+        }
 
+        size_t current_input_base_idx = 0;
+        size_t output_coord_idx = 0;
         for (size_t i = 0; i < input_ndim; ++i)
         {
             if (i == dim)
@@ -248,11 +260,8 @@ void plast_cpu_mean_reduction_dim_int32(const int32_t* input_data, int32_t* outp
             }
             else
             {
-                size_t coord_in_this_dim =
-                    (temp_out_flat_idx / output_strides[current_output_dim_idx]) %
-                    output_shape[current_output_dim_idx];
-                current_input_base_idx += coord_in_this_dim * input_strides[i];
-                current_output_dim_idx++;
+                current_input_base_idx += output_coords[output_coord_idx] * input_strides[i];
+                output_coord_idx++;
             }
         }
 
@@ -282,10 +291,16 @@ void plast_cpu_mean_reduction_dim_strided_int32(const int32_t* input_data, int32
 
     for (size_t out_flat_idx = 0; out_flat_idx < output_total_elements; ++out_flat_idx)
     {
-        size_t current_input_base_physical_idx = 0;
-        size_t temp_out_flat_idx = out_flat_idx;
-        size_t current_output_dim_idx = 0;
+        size_t output_coords[output_ndim];
+        size_t temp_flat_idx = out_flat_idx;
+        for (int i = output_ndim - 1; i >= 0; --i)
+        {
+            output_coords[i] = temp_flat_idx % output_shape[i];
+            temp_flat_idx /= output_shape[i];
+        }
 
+        size_t current_input_base_physical_idx = 0;
+        size_t output_coord_idx = 0;
         for (size_t i = 0; i < input_ndim; ++i)
         {
             if (i == dim)
@@ -294,11 +309,8 @@ void plast_cpu_mean_reduction_dim_strided_int32(const int32_t* input_data, int32
             }
             else
             {
-                size_t coord_in_this_dim =
-                    (temp_out_flat_idx / output_strides[current_output_dim_idx]) %
-                    output_shape[current_output_dim_idx];
-                current_input_base_physical_idx += coord_in_this_dim * input_strides[i];
-                current_output_dim_idx++;
+                current_input_base_physical_idx += output_coords[output_coord_idx] * input_strides[i];
+                output_coord_idx++;
             }
         }
 

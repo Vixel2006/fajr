@@ -7,9 +7,11 @@
 __global__ void abs_cuda_kernel_float_kernel(float* out, const float* in, size_t num_elements)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_elements)
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_elements; i += stride)
     {
-        out[idx] = fabsf(in[idx]);
+        out[i] = fabsf(in[i]);
     }
 }
 
@@ -28,9 +30,11 @@ extern "C" void plast_cuda_abs_kernel_float(float* out, const float* in, size_t 
 __global__ void abs_cuda_kernel_int32_kernel(int32_t* out, const int32_t* in, size_t num_elements)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_elements)
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_elements; i += stride)
     {
-        out[idx] = abs(in[idx]);
+        out[i] = abs(in[i]);
     }
 }
 

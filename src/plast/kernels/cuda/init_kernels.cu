@@ -51,58 +51,54 @@ extern "C"
         }
     }
 
-    __global__ void uniform_kernel_float(float* out, size_t num_elements, float low, float high,
-                                         unsigned long long seed)
-    {
-        size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (idx < num_elements)
+        __global__ void uniform_kernel_float(float* out, size_t num_elements, float low, float high,
+
+                                             unsigned long long seed)
+
         {
-            curandState_t state;
-            curand_init(seed, idx, 0, &state);
-            out[idx] = low + (high - low) * curand_uniform(&state);
+
+            size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+            if (idx < num_elements)
+
+            {
+
+                curandState_t state;
+
+                curand_init(seed, idx, 0, &state);
+
+                out[idx] = low + (high - low) * curand_uniform(&state);
+
+            }
+
         }
-    }
 
-    void plast_cuda_zeros_float(float* out, size_t num_elements)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        zeros_kernel_float<<<blocks, threads>>>(out, num_elements);
-    }
+    
 
-    void plast_cuda_zeros_int(int* out, size_t num_elements)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        zeros_kernel_int<<<blocks, threads>>>(out, num_elements);
-    }
+        void plast_cuda_randn_float(float* out, size_t num_elements, int seed)
 
-    void plast_cuda_ones_float(float* out, size_t num_elements)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        ones_kernel_float<<<blocks, threads>>>(out, num_elements);
-    }
+        {
 
-    void plast_cuda_ones_int(int* out, size_t num_elements)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        ones_kernel_int<<<blocks, threads>>>(out, num_elements);
-    }
+            size_t threads = 256;
 
-    void plast_cuda_randn_float(float* out, size_t num_elements, int seed)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        randn_kernel_float<<<blocks, threads>>>(out, num_elements, (unsigned long long) seed);
-    }
+            size_t blocks = (num_elements + threads - 1) / threads;
 
-    void plast_cuda_uniform_float(float* out, size_t num_elements, float low, float high)
-    {
-        size_t threads = 256;
-        size_t blocks = (num_elements + threads - 1) / threads;
-        uniform_kernel_float<<<blocks, threads>>>(out, num_elements, low, high, 1234ULL);
-    }
+            randn_kernel_float<<<blocks, threads>>>(out, num_elements, (unsigned long long) seed);
+
+        }
+
+    
+
+        void plast_cuda_uniform_float(float* out, size_t num_elements, float low, float high, int seed)
+
+        {
+
+            size_t threads = 256;
+
+            size_t blocks = (num_elements + threads - 1) / threads;
+
+            uniform_kernel_float<<<blocks, threads>>>(out, num_elements, low, high, (unsigned long long) seed);
+
+        }
 
 } // extern "C"

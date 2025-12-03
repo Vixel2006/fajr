@@ -127,9 +127,13 @@ class Tensor:
         Triggers computation of the graph up to this node and returns the data as a numpy array.
         """
         cpp_tensor = _execution_engine.execute(self._cpp_node)
+        np_data = cpp_tensor._get_data_as_numpy()
 
-        # Use the new pybind11 method to get data as a numpy array
-        return cpp_tensor._get_data_as_numpy()
+        # If the C++ tensor's shape is [1] (scalar) but numpy returns (1,), reshape to ()
+        if len(cpp_tensor.shape) == 1 and cpp_tensor.shape[0] == 1 and np_data.shape == (1,):
+            return np.array(np_data.item(), dtype=np_data.dtype)
+        
+        return np_data
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -137,6 +141,9 @@ class Tensor:
         # This would require the C++ Node to store/infer its output shape
         # For now, we'll execute to get the shape from the resulting tensor
         cpp_tensor = _execution_engine.execute(self._cpp_node)
+        # If the C++ tensor reports shape [1] for a scalar, convert it to ()
+        if len(cpp_tensor.shape) == 1 and cpp_tensor.shape[0] == 1:
+            return ()
         return tuple(cpp_tensor.shape)
 
     @property
@@ -368,7 +375,7 @@ class Tensor:
 
     def __repr__(self) -> str:
         # For repr, we might not want to trigger full execution.
-        # This would require the C++ Node to expose its inferred shape/dtype without execution.
+        # This would require the C++ Node to store/infer its output shape
         # For now, we'll execute to get details.
         try:
             cpp_tensor = _execution_engine.execute(self._cpp_node)
@@ -390,16 +397,12 @@ class Tensor:
 if __name__ == "__main__":
     # Create some tensors on CPU
     a_cpu = Tensor(data=[[1.0, 2.0], [3.0, 4.0]], dtype=np.float32, device="cpu")
-    b_cpu = Tensor(data=[[[5.0, 6.0], [7.0, 8.0]], [[5.0, 6.0], [7.0, 8.0]]], dtype=np.float32, device="cpu")
+    b_cpu = Tensor(data=[[5.0, 6.0], [7.0, 8.0]], dtype=np.float32, device="cpu")
 
-    # Perform an operation on CPU
-    c_cpu = a_cpu.broadcast_to(*b_cpu.shape).min(dim=2)
+    c_cpu = a_cpu + b_cpu
 
     # Access data (triggers execution)
     print("Result of a_cpu + b_cpu:")
     print(c_cpu.data)
     print(f"Shape: {c_cpu.shape}, DType: {c_cpu.dtype}, Device: {c_cpu.device}")
     
-    # Example of expand: expand (2,2) to (1,2,2)
-    print(a_cpu.max().data)
-
