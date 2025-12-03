@@ -2,6 +2,7 @@
 
 #include "plast/core/types.h"
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 
@@ -138,6 +139,31 @@ class DataBuffer
             other.nbytes_ = 0;
         }
         return *this;
+    }
+
+    // Fill the buffer with a specific byte value
+    void fill(int value)
+    {
+        if (nbytes_ == 0)
+        {
+            return;
+        }
+
+        switch (device_)
+        {
+        case DeviceType::CPU:
+            std::memset(data_, value, nbytes_);
+            break;
+        case DeviceType::CUDA:
+#ifdef PLAST_CUDA_ENABLED
+            PLAST_CUDA_CHECK(cudaMemset(data_, value, nbytes_));
+#else
+            throw std::runtime_error("CUDA is not enabled. Cannot perform CUDA memset.");
+#endif
+            break;
+        default:
+            throw std::runtime_error("Unsupported device type for DataBuffer fill.");
+        }
     }
 
   private:

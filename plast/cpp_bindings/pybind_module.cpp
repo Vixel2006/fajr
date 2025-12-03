@@ -5,6 +5,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "plast/core/device_management.h"
 #include "plast/core/types.h"
 #include "plast/execution/engine.h"
 #include "plast/graph/node.h"
@@ -36,6 +37,9 @@ namespace py = pybind11;
 PYBIND11_MODULE(_plast_cpp_core, m)
 {
     m.doc() = "plast C++ Core Bindings";
+
+    // Expose is_cuda_available function
+    m.def("is_cuda_available", &plast::core::is_cuda_available, "Checks if CUDA is available.");
 
     // Bind DType enum
     py::enum_<plast::core::DType>(m, "DType")
@@ -85,10 +89,22 @@ PYBIND11_MODULE(_plast_cpp_core, m)
         .def("_get_data_as_numpy",
              [](plast::tensor::Tensor& t) -> py::array
              {
+                 // If the tensor is on CUDA, transfer it to CPU first
+                 std::shared_ptr<plast::tensor::Tensor> cpu_tensor_ptr;
+                 if (t.device() == plast::core::DeviceType::CUDA)
+                 {
+                     cpu_tensor_ptr = std::make_shared<plast::tensor::Tensor>(
+                         t.to(plast::core::DeviceType::CPU));
+                 }
+                 else
+                 {
+                     cpu_tensor_ptr = std::make_shared<plast::tensor::Tensor>(t.clone());
+                 }
+
                  // Determine numpy dtype based on plast::core::DType
                  py::dtype numpy_dtype;
                  size_t itemsize;
-                 switch (t.dtype())
+                 switch (cpu_tensor_ptr->dtype())
                  {
                  case plast::core::DType::FLOAT32:
                      numpy_dtype = py::dtype::of<float>();
@@ -139,13 +155,14 @@ PYBIND11_MODULE(_plast_cpp_core, m)
                  }
 
                  // Calculate strides
-                 std::vector<py::ssize_t> strides_bytes(t.strides().size());
-                 for (size_t i = 0; i < t.strides().size(); ++i)
+                 std::vector<py::ssize_t> strides_bytes(cpu_tensor_ptr->strides().size());
+                 for (size_t i = 0; i < cpu_tensor_ptr->strides().size(); ++i)
                  {
-                     strides_bytes[i] = t.strides()[i] * itemsize;
+                     strides_bytes[i] = cpu_tensor_ptr->strides()[i] * itemsize;
                  }
 
-                 return py::array(numpy_dtype, t.shape(), strides_bytes, t.data());
+                 return py::array(numpy_dtype, cpu_tensor_ptr->shape(), strides_bytes,
+                                  cpu_tensor_ptr->data());
              })
         .def("__repr__",
              [](const plast::tensor::Tensor& t)
@@ -265,9 +282,10 @@ PYBIND11_MODULE(_plast_cpp_core, m)
     m.def(
         "uniform",
         [](const std::vector<size_t>& shape, plast::core::DType dtype,
-           plast::core::DeviceType device, float low, float high)
-        { return plast::ops::init::uniform(shape, dtype, device, low, high); },
-        py::arg("shape"), py::arg("dtype"), py::arg("device"), py::arg("low"), py::arg("high"));
+           plast::core::DeviceType device, float low, float high, int seed)
+        { return plast::ops::init::uniform(shape, dtype, device, low, high, seed); },
+        py::arg("shape"), py::arg("dtype"), py::arg("device"), py::arg("low"), py::arg("high"),
+        py::arg("seed"));
     m.def(
         "from_data",
         [](py::array data_array, const std::vector<size_t>& shape, plast::core::DType dtype,

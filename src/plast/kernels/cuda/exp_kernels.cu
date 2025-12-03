@@ -7,9 +7,11 @@
 __global__ void exp_cuda_kernel_float_kernel(float* out, const float* in, size_t num_elements)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_elements)
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_elements; i += stride)
     {
-        out[idx] = expf(in[idx]);
+        out[i] = expf(in[i]);
     }
 }
 

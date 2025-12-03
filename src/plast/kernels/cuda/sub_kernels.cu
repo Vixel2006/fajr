@@ -4,20 +4,24 @@
 
 __global__ void contig_sub_kernel_float(const float* a, const float* b, float* out, const int n)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n)
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < n; i += stride)
     {
-        out[idx] = a[idx] - b[idx];
+        out[i] = a[i] - b[i];
     }
 }
 
 __global__ void contig_sub_kernel_int32(const int32_t* a, const int32_t* b, int32_t* out,
                                         const int n)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n)
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < n; i += stride)
     {
-        out[idx] = a[idx] - b[idx];
+        out[i] = a[i] - b[i];
     }
 }
 

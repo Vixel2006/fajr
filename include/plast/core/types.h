@@ -3,10 +3,7 @@
 #include <cstdint>
 
 // Define a maximum number of dimensions for tensors to allow fixed-size arrays in CUDA kernels
-#define MAX_TENSOR_DIMS 8
-
-// Define a maximum number of dimensions for tensors to allow fixed-size arrays in CUDA kernels
-#define MAX_TENSOR_DIMS 8
+#define PLAST_MAX_DIMS 8
 
 namespace plast
 {
