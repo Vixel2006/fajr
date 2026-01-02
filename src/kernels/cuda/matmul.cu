@@ -1,0 +1,316 @@
+#include "definitions.h"
+#include "kernels/transpose.h"
+#include "tensor.h"
+#include <cuda_runtime.h>
+#include <stdio.h>
+
+#define CEIL_DIV(a, b) (((a) + (b) - 1) / b)
+#define BLOCKSIZE 32
+
+__global__ void matmul_cuda_forward_contig_kernel(const float *a,
+                                                  const float *b, float *c,
+                                                  u64 batches, u64 rows,
+                                                  u64 inners, u64 cols) {
+  const u64 tx = threadIdx.x % BLOCKSIZE;
+  const u64 ty = threadIdx.x / BLOCKSIZE;
+
+  const u64 col = blockIdx.x * BLOCKSIZE + tx;
+  const u64 row = blockIdx.y * BLOCKSIZE + ty;
+  const u64 batch = blockIdx.z;
+
+  __shared__ float a_tiled[BLOCKSIZE][BLOCKSIZE];
+  __shared__ float b_tiled[BLOCKSIZE][BLOCKSIZE];
+
+  float accum = 0.0f;
+
+  for (u64 phase = 0; phase < inners; phase += BLOCKSIZE) {
+    if (row < rows && (phase + tx) < inners)
+      a_tiled[ty][tx] = a[batch * rows * inners + row * inners + (phase + tx)];
+    else
+      a_tiled[ty][tx] = 0.0f;
+    if ((phase + ty) < inners && col < cols)
+      b_tiled[ty][tx] = b[batch * inners * cols + (phase + ty) * cols + col];
+    else
+      b_tiled[ty][tx] = 0.0f;
+
+    __syncthreads();
+
+    for (u64 k = 0; k < BLOCKSIZE; ++k) {
+      accum += a_tiled[ty][k] * b_tiled[k][tx];
+    }
+
+    __syncthreads();
+  }
+
+  if (row < rows && col < cols) {
+    c[batch * rows * cols + row * cols + col] = accum;
+  }
+}
+
+__global__ void pack_tensor_cuda_kernel(const float *src_data,
+                                        const u64 *src_shape,
+                                        const u64 *src_strides, u64 src_ndim,
+                                        float *dst_data, u64 num_elements) {
+  u64 linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (linear_idx < num_elements) {
+    u64 coords[MAX_NDIM];
+    u64 temp_idx = linear_idx;
+
+    // linear_to_coords
+    for (int i = src_ndim - 1; i >= 0; --i) {
+      coords[i] = temp_idx % src_shape[i];
+      temp_idx /= src_shape[i];
+    }
+
+    // get_offset
+    u64 src_offset = 0;
+    for (u64 i = 0; i < src_ndim; ++i) {
+      src_offset += coords[i] * src_strides[i];
+    }
+
+    dst_data[linear_idx] = src_data[src_offset];
+  }
+}
+
+void pack_tensor_to_contiguous_buffer_cuda(const Tensor *src, void **dst_ptr) {
+  u64 num_elements = numel(src);
+  u64 element_size = dtype_size(src->dtype);
+
+  // Allocate contiguous memory on device
+  cudaError_t err = cudaMalloc(dst_ptr, num_elements * element_size);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA memory allocation failed for packed buffer: %s\n",
+            cudaGetErrorString(err));
+    *dst_ptr = NULL;
+    return;
+  }
+
+  // Copy shape and strides to device
+  u64 *d_src_shape;
+  u64 *d_src_strides;
+  err = cudaMalloc(&d_src_shape, src->ndim * sizeof(u64));
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA memory allocation failed for d_src_shape: %s\n",
+            cudaGetErrorString(err));
+    cudaFree(*dst_ptr);
+    *dst_ptr = NULL;
+    return;
+  }
+  err = cudaMalloc(&d_src_strides, src->ndim * sizeof(u64));
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA memory allocation failed for d_src_strides: %s\n",
+            cudaGetErrorString(err));
+    cudaFree(d_src_shape);
+    cudaFree(*dst_ptr);
+    *dst_ptr = NULL;
+    return;
+  }
+
+  err = cudaMemcpy(d_src_shape, src->shape, src->ndim * sizeof(u64),
+                   cudaMemcpyHostToDevice);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA memcpy failed for d_src_shape: %s\n",
+            cudaGetErrorString(err));
+    cudaFree(d_src_shape);
+    cudaFree(d_src_strides);
+    *dst_ptr = NULL;
+    return;
+  }
+  err = cudaMemcpy(d_src_strides, src->strides, src->ndim * sizeof(u64),
+                   cudaMemcpyHostToDevice);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA memcpy failed for d_src_strides: %s\n",
+            cudaGetErrorString(err));
+    cudaFree(d_src_shape);
+    cudaFree(d_src_strides);
+    *dst_ptr = NULL;
+    return;
+  }
+
+  // Launch kernel
+  u64 threads_per_block = 256;
+  u64 num_blocks = CEIL_DIV(num_elements, threads_per_block);
+
+  pack_tensor_cuda_kernel<<<num_blocks, threads_per_block>>>(
+      (const float *)src->data, d_src_shape, d_src_strides, src->ndim,
+      (float *)*dst_ptr, num_elements);
+
+  cudaFree(d_src_shape);
+  cudaFree(d_src_strides);
+}
+
+extern "C" void matmul_cuda_forward(const Tensor **inputs, Tensor *output,
+                                    ...) {
+  const Tensor *a = inputs[0];
+  const Tensor *b = inputs[1];
+
+  u64 a_ndim = a->ndim;
+  u64 b_ndim = b->ndim;
+
+  u64 M = a->shape[a_ndim - 2];
+  u64 K = a->shape[a_ndim - 1];
+  u64 N = b->shape[b_ndim - 1];
+
+  u64 batches = 1;
+
+  for (u64 i = 0; i < a_ndim - 2; ++i) {
+    batches *= a->shape[i];
+  }
+
+  dim3 block_dim(BLOCKSIZE, BLOCKSIZE, 1);
+  dim3 grid_dim(CEIL_DIV(M, BLOCKSIZE), CEIL_DIV(N, BLOCKSIZE), batches);
+
+  void *a_data_ptr = a->data;
+  void *b_data_ptr = b->data;
+
+  void *a_packed_data = NULL;
+  void *b_packed_data = NULL;
+
+  if (!is_contiguous(a)) {
+    pack_tensor_to_contiguous_buffer_cuda(a, &a_packed_data);
+    if (a_packed_data == NULL) {
+      fprintf(stderr, "Failed to pack tensor A in matmul_cuda_forward\n");
+      return;
+    }
+    a_data_ptr = a_packed_data;
+  }
+
+  if (!is_contiguous(b)) {
+    pack_tensor_to_contiguous_buffer_cuda(b, &b_packed_data);
+    if (b_packed_data == NULL) {
+      fprintf(stderr, "Failed to pack tensor B in matmul_cuda_forward\n");
+      if (a_packed_data)
+        cudaFree(a_packed_data);
+      return;
+    }
+    b_data_ptr = b_packed_data;
+  }
+
+  switch (a->dtype) {
+  case FLOAT32:
+    matmul_cuda_forward_contig_kernel<<<grid_dim, block_dim>>>(
+        (const float *)a_data_ptr, (const float *)b_data_ptr,
+        (float *)output->data, batches, M, K, N);
+    break;
+  default:
+    fprintf(stderr, "Unsupported data type for matmul_cuda_forward\n");
+    break;
+  }
+
+  if (a_packed_data)
+    cudaFree(a_packed_data);
+  if (b_packed_data)
+    cudaFree(b_packed_data);
+}
+
+extern "C" void matmul_cuda_backward(Tensor **inputs, const Tensor *output,
+                                     ...) {
+  Tensor *a = inputs[0];
+  Tensor *b = inputs[1];
+  Tensor *da = a->grad;
+  Tensor *db = b->grad;
+  const Tensor *dc = output->grad;
+
+  u64 a_ndim = a->ndim;
+  u64 b_ndim = b->ndim;
+
+  u64 M = a->shape[a_ndim - 2];
+  u64 K = a->shape[a_ndim - 1];
+  u64 N = b->shape[b_ndim - 1];
+
+  u64 batches = 1;
+  for (u64 i = 0; i < a_ndim - 2; ++i) {
+    batches *= a->shape[i];
+  }
+
+  // Pointers for potentially packed data on device
+  void *dc_data_ptr = dc->data;
+  void *dc_packed_data = NULL;
+
+  if (!is_contiguous(dc)) {
+    pack_tensor_to_contiguous_buffer_cuda(dc, &dc_packed_data);
+    if (dc_packed_data == NULL) {
+      fprintf(stderr, "Failed to pack tensor DC in matmul_cuda_backward\n");
+      return;
+    }
+    dc_data_ptr = dc_packed_data;
+  }
+
+  switch (a->dtype) {
+  case FLOAT32:
+    if (a->requires_grad) {
+      const Tensor *b_inputs_array[] = {b};
+      Tensor b_transposed_struct;
+      transpose_cpu_forward(b_inputs_array, &b_transposed_struct, b->ndim - 2,
+                            b->ndim - 1);
+
+      void *b_transposed_data_ptr = b_transposed_struct.data;
+      void *b_transposed_packed_data = NULL;
+
+      if (!is_contiguous(&b_transposed_struct)) {
+        pack_tensor_to_contiguous_buffer_cuda(&b_transposed_struct,
+                                              &b_transposed_packed_data);
+        if (b_transposed_packed_data == NULL) {
+          fprintf(stderr,
+                  "Failed to pack transposed B in matmul_cuda_backward\n");
+          if (dc_packed_data)
+            cudaFree(dc_packed_data);
+          return;
+        }
+        b_transposed_data_ptr = b_transposed_packed_data;
+      }
+
+      // Define grid and block dimensions for this kernel call
+      dim3 block_dim_da(BLOCKSIZE, BLOCKSIZE, 1);
+      dim3 grid_dim_da(CEIL_DIV(M, BLOCKSIZE), CEIL_DIV(K, BLOCKSIZE), batches);
+
+      matmul_cuda_forward_contig_kernel<<<grid_dim_da, block_dim_da>>>(
+          (const float *)dc_data_ptr, (const float *)b_transposed_data_ptr,
+          (float *)da->data, batches, M, N, K);
+
+      if (b_transposed_packed_data)
+        cudaFree(b_transposed_packed_data);
+    }
+
+    if (b->requires_grad) {
+      const Tensor *a_inputs_array[] = {a};
+      Tensor a_transposed_struct;
+      transpose_cpu_forward(a_inputs_array, &a_transposed_struct, a->ndim - 2,
+                            a->ndim - 1);
+
+      void *a_transposed_data_ptr = a_transposed_struct.data;
+      void *a_transposed_packed_data = NULL;
+
+      if (!is_contiguous(&a_transposed_struct)) {
+        pack_tensor_to_contiguous_buffer_cuda(&a_transposed_struct,
+                                              &a_transposed_packed_data);
+        if (a_transposed_packed_data == NULL) {
+          fprintf(stderr,
+                  "Failed to pack transposed A in matmul_cuda_backward\n");
+          if (dc_packed_data)
+            cudaFree(dc_packed_data);
+          return;
+        }
+        a_transposed_data_ptr = a_transposed_packed_data;
+      }
+
+      // Define grid and block dimensions for this kernel call
+      dim3 block_dim_db(BLOCKSIZE, BLOCKSIZE, 1);
+      dim3 grid_dim_db(CEIL_DIV(K, BLOCKSIZE), CEIL_DIV(N, BLOCKSIZE), batches);
+
+      matmul_cuda_forward_contig_kernel<<<grid_dim_db, block_dim_db>>>(
+          (const float *)a_transposed_data_ptr, (const float *)dc_data_ptr,
+          (float *)db->data, batches, K, M, N);
+
+      if (a_transposed_packed_data)
+        cudaFree(a_transposed_packed_data);
+    }
+    break;
+  default:
+    break;
+  }
+
+  if (dc_packed_data)
+    cudaFree(dc_packed_data);
+}
