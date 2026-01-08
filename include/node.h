@@ -9,8 +9,8 @@ typedef struct Node {
   int num_inputs;
   bool visited;
   bool on_stack;
-  u64 dim; // For reduction operations
-  bool keepdim; // For reduction operations
+  u64 dim;
+  bool keepdim;
 } Node;
 
 Node *arena_node_alloc(Arena *a, Tensor **inputs, int num_inputs,

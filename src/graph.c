@@ -29,28 +29,22 @@ void insert_node(DAG *dag, Node *node) {
 }
 
 void topological_sort(DAG *dag, Node *root) {
-  if (root->visited) {
-    return;
-  }
   root->visited = true;
-  root->on_stack = true;
 
   for (u64 i = 0; i < root->num_inputs; ++i) {
-    if (root->inputs[i]->creator) {
+    if (root->inputs[i]->creator && !root->inputs[i]->creator->visited) {
       topological_sort(dag, root->inputs[i]->creator);
     }
   }
-
   insert_node(dag, root);
-  root->on_stack = false;
 }
 
 void build_dag(DAG *dag, Node *root) {
-  topological_sort(dag, root);
-
+  // Reset visited flags before traversal
   for (u64 i = 0; i < dag->count; ++i) {
     dag->nodes[i]->visited = false;
   }
+  topological_sort(dag, root);
 }
 
 void forward(Node *node) {

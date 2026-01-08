@@ -63,23 +63,35 @@ int main() {
 
   Tensor *t1 = init(&a, &ac, CPU, FLOAT32, (u64[]){2, 2}, 2, true, ones);
   Tensor *t2 = init(&a, &ac, CPU, FLOAT32, (u64[]){2, 2}, 2, true, ones);
-  Tensor *t3 = arena_tensor_alloc(&a, &ac, (u64[]){2, 2}, 2, (u64[]){1, 1},
+  Tensor *t3 = arena_tensor_alloc(&a, &ac, (u64[]){2, 2}, 2, (u64[]){2, 1},
+                                  FLOAT32, true, NULL, CPU);
+  Tensor *t4 = init(&a, &ac, CPU, FLOAT32, (u64[]){2, 2}, 2, true, ones);
+  Tensor *t5 = arena_tensor_alloc(&a, &ac, (u64[]){2, 2}, 2, (u64[]){2, 1},
                                   FLOAT32, true, NULL, CPU);
 
-  set_ones_grad(t3);
+  set_ones_grad(t5);
 
-  Node *node = arena_node_alloc(&a, (Tensor *[]){t1, t2}, 2, t3,
-                                get_op_impl(MATMUL), 0, false);
+  Node *node1 = arena_node_alloc(&a, (Tensor *[]){t1, t2}, 2, t3,
+                                 get_op_impl(ADD), 0, false);
+  Node *node2 = arena_node_alloc(&a, (Tensor *[]){t3, t4}, 2, t5,
+                                 get_op_impl(ADD), 0, false);
 
-  forward(node);
-  backward(node);
+  printf("node 1 = %p, node 2 = %p\n", t3->creator, t5->creator);
 
+  forward(node2);
+  backward(node2);
+  //  backward(node1);
+
+  print_tensor(t5, "t5");
+  print_tensor(t4, "t4");
   print_tensor(t3, "t3");
   print_tensor(t2, "t2");
   print_tensor(t1, "t1");
   print_tensor(t1->grad, "grad t1");
   print_tensor(t2->grad, "grad t2");
   print_tensor(t3->grad, "grad t3");
+  print_tensor(t4->grad, "grad t4");
+  print_tensor(t5->grad, "grad t5");
 
   arena_release(&a);
   arena_release(&ac);

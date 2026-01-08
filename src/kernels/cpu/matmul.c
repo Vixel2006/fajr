@@ -51,7 +51,7 @@ void matmul_cpu_forward_float_contig_kernel(const float *a, const float *b,
           for (u64 row = row_tile; row < row_tile_end; ++row) {
             for (u64 inner = inner_tile; inner < inner_tile_end; ++inner) {
               for (u64 col = col_tile; col < col_tile_end; ++col) {
-                c[batch * rows * cols + row * cols + col] +=
+                c[batch * rows * cols + row * cols + col] += 
                     a[batch * rows * inners + row * inners + inner] *
                     b[batch * inners * cols + inner * cols + col];
               }
@@ -143,26 +143,64 @@ void matmul_cpu_backward(Tensor **inputs, const Tensor *output, ...) {
   Tensor *b = inputs[1];
   Tensor *da = a->grad;
   Tensor *db = b->grad;
-  const Tensor *c = output;
-  const Tensor *dc = c->grad;
+  const Tensor *dc = output->grad;
 
-  u64 a_ndim = a->ndim;
-  u64 b_ndim = b->ndim;
+  if (dc == NULL) {
+    return;
+  }
 
-  u64 M = a->shape[a_ndim - 2];
-  u64 K = a->shape[a_ndim - 1];
-  u64 N = b->shape[b_ndim - 1];
+  u64 M = a->shape[a->ndim - 2];
+  u64 K = a->shape[a->ndim - 1];
+  u64 N = b->shape[b->ndim - 1];
 
   u64 batches = 1;
-  for (u64 i = 0; i < a_ndim - 2; ++i) {
+  for (u64 i = 0; i < a->ndim - 2; ++i) {
     batches *= a->shape[i];
   }
 
   // NOTE: da = dc @ B.T
   if (a->requires_grad) {
+    u64 tmp_shape = b->shape[b->ndim - 1];
+    b->shape[b->ndim - 1] = b->shape[b->ndim - 2];
+    b->shape[b->ndim - 2] = tmp_shape;
+
+    u64 tmp_stride = b->strides[b->ndim - 1];
+    b->strides[b->ndim - 1] = b->strides[b->ndim - 2];
+    b->strides[b->ndim - 2] = tmp_stride;
+
+    matmul_cpu_forward_float_contig_kernel((const float *)dc->data,
+                                           (const float *)b->data,
+                                           (float *)da->data, batches, M, N, K);
+
+    tmp_shape = b->shape[b->ndim - 1];
+    b->shape[b->ndim - 1] = b->shape[b->ndim - 2];
+    b->shape[b->ndim - 2] = tmp_shape;
+
+    tmp_stride = b->strides[b->ndim - 1];
+    b->strides[b->ndim - 1] = b->strides[b->ndim - 2];
+    b->strides[b->ndim - 2] = tmp_stride;
   }
 
   // NOTE: db = A.T @ dc
   if (b->requires_grad) {
+    u64 tmp_shape = a->shape[a->ndim - 1];
+    a->shape[a->ndim - 1] = a->shape[a->ndim - 2];
+    a->shape[a->ndim - 2] = tmp_shape;
+
+    u64 tmp_stride = a->strides[a->ndim - 1];
+    a->strides[a->ndim - 1] = a->strides[a->ndim - 2];
+    a->strides[b->ndim - 2] = tmp_stride;
+
+    matmul_cpu_forward_float_contig_kernel((const float *)a->data,
+                                           (const float *)dc->data,
+                                           (float *)db->data, batches, N, M, K);
+
+    tmp_shape = a->shape[a->ndim - 1];
+    a->shape[a->ndim - 1] = a->shape[a->ndim - 2];
+    a->shape[a->ndim - 2] = tmp_shape;
+
+    tmp_stride = a->strides[a->ndim - 1];
+    a->strides[a->ndim - 1] = a->strides[a->ndim - 2];
+    a->strides[a->ndim - 2] = tmp_stride;
   }
 }
