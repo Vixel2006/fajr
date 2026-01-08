@@ -16,3 +16,4 @@ void build_dag(DAG *dag, Node *root);
 void forward(Node *node);
 void backward(Node *node);
 void dag_release(DAG *dag);
+void reset_node_flags(Node *node);
